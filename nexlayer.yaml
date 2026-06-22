@@ -1,0 +1,34 @@
+application:
+  name: langfuse
+  pods:
+  - name: app
+    image: langfuse/langfuse:latest
+    path: /
+    servicePorts:
+    - 3000
+    vars:
+      DATABASE_URL: "postgresql://langfuse:langfuse@postgres.pod:5432/langfuse"
+      NEXTAUTH_URL: "https://relaxed-weasel-langfuse.cloud.nexlayer.ai"
+      NEXTAUTH_SECRET: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+      SALT: "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+      ENCRYPTION_KEY: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      LANGFUSE_INIT_ORG_ID: "nexlayer-org"
+      LANGFUSE_INIT_ORG_NAME: "Nexlayer"
+      LANGFUSE_INIT_PROJECT_ID: "nexlayer-project"
+      LANGFUSE_INIT_PROJECT_NAME: "default"
+      LANGFUSE_INIT_USER_EMAIL: "armond@nexlayer.com"
+      LANGFUSE_INIT_USER_NAME: "Armond"
+      LANGFUSE_INIT_USER_PASSWORD: "nexlayer2024"
+  - name: postgres
+    image: postgres:16-alpine
+    servicePorts:
+    - 5432
+    vars:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+    volumes:
+    - name: langfuse-db
+      mountPath: /var/lib/postgresql/data
+      size: 5Gi
