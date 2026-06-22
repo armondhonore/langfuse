@@ -221,6 +221,13 @@ export class BufferedStreamUploader {
         if (!isTransientError(error)) {
           return false;
         }
+        // exponential-backoff invokes this callback before its own attempt-limit
+        // check, so it also fires on the final failing attempt where no retry
+        // follows. Only count (and log "Retrying...") when an attempt remains, so
+        // partRetries reflects actual retries rather than total failures.
+        if (attemptNumber >= this.params.maxPartAttempts) {
+          return true;
+        }
         this.stats.partRetries++;
         logger.warn(
           `Part ${partNumber} upload failed (attempt ${attemptNumber}/${this.params.maxPartAttempts}): ${error.message}. Retrying...`,

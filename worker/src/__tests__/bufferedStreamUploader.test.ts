@@ -407,10 +407,13 @@ describe("BufferedStreamUploader", () => {
         "socket hang up",
       );
 
-      // The caller's sink survives the throw with accurate counts.
+      // The caller's sink survives the throw with accurate counts. With
+      // maxPartAttempts=2 the part fails attempt 1 (one real retry follows) then
+      // fails attempt 2 (no retry) — so exactly 1 retry, not 2 (the final
+      // failing attempt must not be counted as a retry).
       expect(stats.partsUploaded).toBe(0);
       expect(stats.partFailures).toBe(1);
-      expect(stats.partRetries).toBeGreaterThanOrEqual(1);
+      expect(stats.partRetries).toBe(1);
     });
 
     it("should stop scheduling new parts when a concurrent part fails", async () => {

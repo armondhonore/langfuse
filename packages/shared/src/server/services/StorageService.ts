@@ -1503,12 +1503,16 @@ class OCIObjectStorageService implements StorageService {
     fileType,
     data,
     partSizeBytes,
+    maxConcurrentParts,
   }: UploadFileBuffered): Promise<UploadPartStats | undefined> {
+    // OCI's uploadFile maps queueSize → UploadManager.maxConcurrentUploads, so
+    // forward the concurrency knob (undefined keeps OCI's default of 5).
     await this.uploadFile({
       fileName,
       fileType,
       data,
       partSize: partSizeBytes,
+      queueSize: maxConcurrentParts,
     });
     return undefined; // OCI does not produce part-level stats.
   }

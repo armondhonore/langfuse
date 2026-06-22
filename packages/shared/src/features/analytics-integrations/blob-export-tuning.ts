@@ -88,12 +88,11 @@ export const BlobExportTuningSchema = z.object({
 
 export type BlobExportTuning = z.infer<typeof BlobExportTuningSchema>;
 
-// Env/default values the resolver falls back to when a numeric upload knob is
-// absent or invalid.
+// Default the resolver falls back to for partSizeBytes when the column is absent
+// or invalid. Concurrency/attempts intentionally have NO default here — see
+// ResolvedBlobExportTuning for why they resolve to `undefined`.
 export interface BlobExportTuningDefaults {
   partSizeBytes: number;
-  maxConcurrentParts: number;
-  maxPartAttempts: number;
 }
 
 export type ResolvedBlobExportTuning = {
@@ -101,8 +100,13 @@ export type ResolvedBlobExportTuning = {
   // undefined => use the zlib default (6); a concrete 0-9 otherwise.
   gzipLevel: number | undefined;
   partSizeBytes: number;
-  maxConcurrentParts: number;
-  maxPartAttempts: number;
+  // undefined => the operator did not set the knob; each StorageService backend
+  // applies its own native default (S3 buffered → env var, Azure → 5, OCI → 5).
+  // Resolving these to a concrete env value here would silently override those
+  // per-backend defaults — e.g. dropping Azure concurrency 5→3 — and break the
+  // "null column reproduces today's behaviour" contract (LFE-10394 review).
+  maxConcurrentParts: number | undefined;
+  maxPartAttempts: number | undefined;
   skipEnrichment: boolean;
 };
 
@@ -146,6 +150,38 @@ function resolveNumber(
   return clamped;
 }
 
+// Like resolveNumber, but returns `undefined` when the field is absent so the
+// caller can tell "operator did not set this" from "operator set the default".
+// Wrong-typed values also resolve to undefined (with a warning) so a malformed
+// knob falls back to the backend default rather than throwing.
+function resolveOptionalNumber(
+  field: string,
+  value: unknown,
+  bound: Bound,
+  warnings: string[],
+): number | undefined {
+  if (value === undefined) return undefined; // absent → backend default, silent
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    warnings.push(
+      `${field}: expected a finite number, got ${JSON.stringify(value)}; using backend default`,
+    );
+    return undefined;
+  }
+  const rounded = Math.round(value);
+  const clamped = Math.min(bound.max, Math.max(bound.min, rounded));
+  if (rounded !== value) {
+    warnings.push(
+      `${field}: ${value} is not an integer; rounded to ${rounded}`,
+    );
+  }
+  if (clamped !== rounded) {
+    warnings.push(
+      `${field}: ${rounded} out of range [${bound.min}, ${bound.max}]; clamped to ${clamped}`,
+    );
+  }
+  return clamped;
+}
+
 function resolveBoolean(
   field: string,
   value: unknown,
@@ -168,18 +204,26 @@ function resolveGzipLevel(
   warnings: string[],
 ): number | undefined {
   if (value === undefined) return undefined;
-  if (
-    typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= 0 &&
-    value <= 9
-  ) {
-    return value;
+  // Distinct failure modes get accurate messages (mirrors resolveNumber): a
+  // wrong type, a non-integer, and a true out-of-range value are different
+  // problems and "out of range" would mislead for the first two.
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    warnings.push(
+      `gzipLevel: expected a finite number, got ${JSON.stringify(value)}; using zlib default`,
+    );
+    return undefined;
   }
-  warnings.push(
-    `gzipLevel: ${JSON.stringify(value)} out of range (expected integer 0-9); using zlib default`,
-  );
-  return undefined;
+  if (!Number.isInteger(value)) {
+    warnings.push(`gzipLevel: ${value} is not an integer; using zlib default`);
+    return undefined;
+  }
+  if (value < 0 || value > 9) {
+    warnings.push(
+      `gzipLevel: ${value} out of range [0, 9]; using zlib default`,
+    );
+    return undefined;
+  }
+  return value;
 }
 
 /**
@@ -204,8 +248,8 @@ export function resolveBlobExportTuning(
     rawPassthrough: false,
     gzipLevel: undefined,
     partSizeBytes: defaults.partSizeBytes,
-    maxConcurrentParts: defaults.maxConcurrentParts,
-    maxPartAttempts: defaults.maxPartAttempts,
+    maxConcurrentParts: undefined,
+    maxPartAttempts: undefined,
     skipEnrichment: false,
   };
 
@@ -237,18 +281,16 @@ export function resolveBlobExportTuning(
         defaults.partSizeBytes,
         warnings,
       ),
-      maxConcurrentParts: resolveNumber(
+      maxConcurrentParts: resolveOptionalNumber(
         "maxConcurrentParts",
         obj.maxConcurrentParts,
         BLOB_EXPORT_TUNING_BOUNDS.maxConcurrentParts,
-        defaults.maxConcurrentParts,
         warnings,
       ),
-      maxPartAttempts: resolveNumber(
+      maxPartAttempts: resolveOptionalNumber(
         "maxPartAttempts",
         obj.maxPartAttempts,
         BLOB_EXPORT_TUNING_BOUNDS.maxPartAttempts,
-        defaults.maxPartAttempts,
         warnings,
       ),
       skipEnrichment: resolveBoolean(

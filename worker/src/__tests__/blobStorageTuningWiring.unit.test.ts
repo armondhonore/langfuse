@@ -123,11 +123,10 @@ describe("handleBlobStorageIntegrationProjectJob tuning wiring", () => {
     expect(uploadCalls.length).toBeGreaterThan(0);
     for (const call of uploadCalls) {
       expect(call.partSizeBytes).toBe(100 * 1024 * 1024); // 100 MiB default
-      // env defaults (1–10, default 3) flow through; assert within env bounds.
-      expect(call.maxConcurrentParts).toBeGreaterThanOrEqual(1);
-      expect(call.maxConcurrentParts).toBeLessThanOrEqual(10);
-      expect(call.maxPartAttempts).toBeGreaterThanOrEqual(1);
-      expect(call.maxPartAttempts).toBeLessThanOrEqual(10);
+      // Concurrency/attempts are undefined when unset so each StorageService
+      // backend keeps its native default (Azure 5, buffered S3 env, etc.).
+      expect(call.maxConcurrentParts).toBeUndefined();
+      expect(call.maxPartAttempts).toBeUndefined();
     }
   });
 });

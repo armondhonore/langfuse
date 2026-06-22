@@ -50,8 +50,9 @@ import {
   DEFAULT_BLOB_EXPORT_PART_SIZE_BYTES,
 } from "@langfuse/shared";
 import { decrypt } from "@langfuse/shared/encryption";
-// Upload concurrency/attempts defaults live in the shared env (read by
-// StorageService); source them here so the resolver, span, and log agree.
+// LANGFUSE_S3_UPLOAD_ENABLE_BUFFERED lives in the shared env (read by
+// StorageService); used here to gate part-level upload stats, which only the
+// S3 buffered path produces.
 import { env as sharedEnv } from "@langfuse/shared/src/env";
 import { randomUUID } from "crypto";
 import { SpanKind } from "@opentelemetry/api";
@@ -284,10 +285,12 @@ const processBlobStorageExport = async (config: {
   convertV4LatencyToSeconds: boolean;
   exportFieldGroups?: ObservationFieldGroupFull[];
   rawPassthrough: boolean;
-  // LFE-10394 upload tuning (resolved + clamped); env/100 MB defaults when absent.
+  // LFE-10394 upload tuning (resolved + clamped). partSizeBytes always concrete
+  // (100 MB default); concurrency/attempts are undefined unless the operator set
+  // them, so each StorageService backend keeps its native default.
   partSizeBytes: number;
-  maxConcurrentParts: number;
-  maxPartAttempts: number;
+  maxConcurrentParts: number | undefined;
+  maxPartAttempts: number | undefined;
   skipEnrichment: boolean;
   bullmqJobId: string | undefined;
   bullmqAttemptsMade: number;
@@ -340,11 +343,20 @@ const processBlobStorageExport = async (config: {
 
       // Resolved per-project tuning (after clamp/fallback) for correlation.
       span.setAttribute("blob.config.partSizeBytes", config.partSizeBytes);
-      span.setAttribute(
-        "blob.config.maxConcurrentParts",
-        config.maxConcurrentParts,
-      );
-      span.setAttribute("blob.config.maxPartAttempts", config.maxPartAttempts);
+      // Only set when the operator tuned them; otherwise the backend default
+      // applies and there is no single value to report.
+      if (config.maxConcurrentParts !== undefined) {
+        span.setAttribute(
+          "blob.config.maxConcurrentParts",
+          config.maxConcurrentParts,
+        );
+      }
+      if (config.maxPartAttempts !== undefined) {
+        span.setAttribute(
+          "blob.config.maxPartAttempts",
+          config.maxPartAttempts,
+        );
+      }
       span.setAttribute("blob.config.skipEnrichment", config.skipEnrichment);
       span.setAttribute("blob.config.rawPassthrough", config.rawPassthrough);
 
@@ -553,12 +565,18 @@ const processBlobStorageExport = async (config: {
         // 100 MB parts support files up to ~1 TB (100 MB × 10,000 AWS limit)
         // This prevents hitting AWS's 10,000 part limit on large exports
         // uploadStats is a mutable sink the uploader fills live, so the counts
-        // land on the span even when the upload throws.
+        // land on the span even when the upload throws. Only the S3 buffered
+        // path populates it; on every other path it stays {0,0,0}, so gate the
+        // telemetry on whether stats are actually produced to avoid reporting
+        // real exports as zero-part uploads.
         const uploadStats = {
           partsUploaded: 0,
           partRetries: 0,
           partFailures: 0,
         };
+        const producesUploadStats =
+          config.type !== BlobStorageIntegrationType.AZURE_BLOB_STORAGE &&
+          sharedEnv.LANGFUSE_S3_UPLOAD_ENABLE_BUFFERED === "true";
         let uploadStartMs: number | undefined;
         try {
           uploadStartMs = performance.now();
@@ -587,9 +605,11 @@ const processBlobStorageExport = async (config: {
               `path=${passthroughEligible ? "passthrough" : "standard"} ` +
               `rows=${sourceStats.rows} sourceWaitMs=${Math.round(sourceStats.sourceWaitMs)} ` +
               `serializedBytes=${serializedCounter.bytes} uploadDurationMs=${Math.round(performance.now() - uploadStartMs)} ` +
-              `partSizeBytes=${config.partSizeBytes} maxConcurrentParts=${config.maxConcurrentParts} ` +
-              `maxPartAttempts=${config.maxPartAttempts} skipEnrichment=${config.skipEnrichment} ` +
-              `uploadParts=${uploadStats.partsUploaded} uploadRetries=${uploadStats.partRetries} uploadFailures=${uploadStats.partFailures}` +
+              `partSizeBytes=${config.partSizeBytes} maxConcurrentParts=${config.maxConcurrentParts ?? "default"} ` +
+              `maxPartAttempts=${config.maxPartAttempts ?? "default"} skipEnrichment=${config.skipEnrichment}` +
+              (producesUploadStats
+                ? ` uploadParts=${uploadStats.partsUploaded} uploadRetries=${uploadStats.partRetries} uploadFailures=${uploadStats.partFailures}`
+                : "") +
               (gzipStats && compressedCounter
                 ? ` gzipLevel=${gzipStats.level} gzipActiveMs=${Math.round(gzipStats.activeMs)} ` +
                   `compressedBytes=${compressedCounter.bytes}`
@@ -608,9 +628,13 @@ const processBlobStorageExport = async (config: {
               Math.round(performance.now() - uploadStartMs),
             );
           }
-          span.setAttribute("blob.upload.parts", uploadStats.partsUploaded);
-          span.setAttribute("blob.upload.retries", uploadStats.partRetries);
-          span.setAttribute("blob.upload.failures", uploadStats.partFailures);
+          // Only the S3 buffered path produces these; recording them on other
+          // paths would report real exports as zero-part uploads.
+          if (producesUploadStats) {
+            span.setAttribute("blob.upload.parts", uploadStats.partsUploaded);
+            span.setAttribute("blob.upload.retries", uploadStats.partRetries);
+            span.setAttribute("blob.upload.failures", uploadStats.partFailures);
+          }
           if (compressedCounter) {
             span.setAttribute("blob.compressedBytes", compressedCounter.bytes);
           }
@@ -824,8 +848,6 @@ export const handleBlobStorageIntegrationProjectJob = async (
     const { resolved: exportTuning, warnings: exportTuningWarnings } =
       resolveBlobExportTuning(blobStorageIntegration.exportTuning, {
         partSizeBytes: DEFAULT_BLOB_EXPORT_PART_SIZE_BYTES,
-        maxConcurrentParts: sharedEnv.LANGFUSE_S3_UPLOAD_MAX_CONCURRENT_PARTS,
-        maxPartAttempts: sharedEnv.LANGFUSE_S3_UPLOAD_MAX_PART_ATTEMPTS,
       });
     for (const warning of exportTuningWarnings) {
       logger.warn(

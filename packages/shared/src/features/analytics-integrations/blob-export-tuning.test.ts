@@ -11,11 +11,11 @@ import {
 
 const DEFAULTS: BlobExportTuningDefaults = {
   partSizeBytes: DEFAULT_BLOB_EXPORT_PART_SIZE_BYTES, // 100 MiB
-  maxConcurrentParts: 3, // env default
-  maxPartAttempts: 3, // env default
 };
 
 // Fully-resolved object with the defaults applied; override per assertion.
+// Concurrency/attempts default to undefined (operator did not set them) so the
+// backend keeps its native default.
 function resolved(
   overrides: Partial<ResolvedBlobExportTuning> = {},
 ): ResolvedBlobExportTuning {
@@ -23,8 +23,8 @@ function resolved(
     rawPassthrough: false,
     gzipLevel: undefined,
     partSizeBytes: DEFAULTS.partSizeBytes,
-    maxConcurrentParts: DEFAULTS.maxConcurrentParts,
-    maxPartAttempts: DEFAULTS.maxPartAttempts,
+    maxConcurrentParts: undefined,
+    maxPartAttempts: undefined,
     skipEnrichment: false,
     ...overrides,
   };
@@ -146,15 +146,31 @@ describe("resolveBlobExportTuning", () => {
       );
       expect(tooHigh.resolved.rawPassthrough).toBe(true);
       expect(tooHigh.resolved.gzipLevel).toBeUndefined();
-      expect(tooHigh.warnings.length).toBe(1);
+      expect(
+        tooHigh.warnings.some((w) => w.includes("out of range [0, 9]")),
+      ).toBe(true);
 
       expect(
         resolveBlobExportTuning({ gzipLevel: -1 }, DEFAULTS).resolved.gzipLevel,
       ).toBeUndefined();
+    });
+
+    it("reports gzipLevel failure modes with accurate, distinct messages", () => {
+      // non-integer in range → "not an integer", NOT "out of range"
+      const frac = resolveBlobExportTuning({ gzipLevel: 5.5 }, DEFAULTS);
+      expect(frac.resolved.gzipLevel).toBeUndefined();
+      expect(frac.warnings.some((w) => w.includes("is not an integer"))).toBe(
+        true,
+      );
+      expect(frac.warnings.some((w) => w.includes("out of range"))).toBe(false);
+
+      // wrong type → "expected a finite number", NOT "out of range"
+      const str = resolveBlobExportTuning({ gzipLevel: "high" }, DEFAULTS);
+      expect(str.resolved.gzipLevel).toBeUndefined();
       expect(
-        resolveBlobExportTuning({ gzipLevel: 3.5 }, DEFAULTS).resolved
-          .gzipLevel,
-      ).toBeUndefined();
+        str.warnings.some((w) => w.includes("expected a finite number")),
+      ).toBe(true);
+      expect(str.warnings.some((w) => w.includes("out of range"))).toBe(false);
     });
   });
 
@@ -256,18 +272,18 @@ describe("resolveBlobExportTuning", () => {
   });
 
   describe("wrong-typed / non-finite values fall back to defaults and warn", () => {
-    it("falls back when a numeric field is a string", () => {
+    it("falls back to undefined (backend default) when a concurrency knob is a string", () => {
       const { resolved: res, warnings } = resolveBlobExportTuning(
         { maxConcurrentParts: "x" },
         DEFAULTS,
       );
-      expect(res.maxConcurrentParts).toBe(DEFAULTS.maxConcurrentParts);
+      expect(res.maxConcurrentParts).toBeUndefined();
       expect(warnings.some((w) => w.includes("expected a finite number"))).toBe(
         true,
       );
     });
 
-    it("falls back when a numeric field is NaN", () => {
+    it("falls back to the partSize default when partSizeBytes is NaN", () => {
       const { resolved: res, warnings } = resolveBlobExportTuning(
         { partSizeBytes: NaN },
         DEFAULTS,
