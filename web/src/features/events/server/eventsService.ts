@@ -34,6 +34,7 @@ import {
   getObservationsBatchIOFromEventsTable,
   getScoresForObservations,
   getScoresForTraces,
+  logger,
   traceException,
 } from "@langfuse/shared/src/server";
 import { type timeFilter, type FilterState } from "@langfuse/shared";
@@ -93,6 +94,40 @@ type GroupedEventsFilterOptions = {
   limit?: number;
   offset?: number;
   orderBy?: string;
+};
+
+const EVENT_FILTER_OPTIONS_DEFAULT_LOOKBACK_DAYS = 30;
+const EVENT_FILTER_OPTIONS_DEFAULT_LOOKBACK_MS =
+  EVENT_FILTER_OPTIONS_DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+
+const getDefaultEventFilterOptionsStartTimeFilter = (): TimeFilter[] => [
+  {
+    column: "startTime",
+    type: "datetime",
+    operator: ">=",
+    value: new Date(Date.now() - EVENT_FILTER_OPTIONS_DEFAULT_LOOKBACK_MS),
+  },
+];
+
+const applyDefaultStartTimeFilterForEventFilterOptions = (
+  params: GetObservationsFilterOptionsParams,
+): GetObservationsFilterOptionsParams => {
+  if (params.startTimeFilter && params.startTimeFilter.length > 0) {
+    return params;
+  }
+
+  logger.warn(
+    "events.filterOptions called without startTimeFilter; applying default lookback",
+    {
+      projectId: params.projectId,
+      defaultLookbackDays: EVENT_FILTER_OPTIONS_DEFAULT_LOOKBACK_DAYS,
+    },
+  );
+
+  return {
+    ...params,
+    startTimeFilter: getDefaultEventFilterOptionsStartTimeFilter(),
+  };
 };
 
 /**
@@ -486,9 +521,10 @@ export async function getEventFilterNumericRange(
 export async function getEventFilterOptions(
   params: GetObservationsFilterOptionsParams,
 ) {
-  const { projectId } = params;
+  const scopedParams = applyDefaultStartTimeFilterForEventFilterOptions(params);
+  const { projectId } = scopedParams;
   const { eventsFilter, traceTimestampFilters, traceScoreTimestampFilters } =
-    getEventFilterOptionsScope(params);
+    getEventFilterOptionsScope(scopedParams);
 
   const [
     numericScoreNames,
