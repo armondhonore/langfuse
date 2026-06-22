@@ -18,7 +18,33 @@ export default [
     },
     rules: {
       "tailwindcss/classnames-order": "off",
-      "tailwindcss/no-custom-classname": "warn",
+      "tailwindcss/no-custom-classname": [
+        "warn",
+        {
+          whitelist: [
+            // Used by parent arbitrary selectors to tune IO preview section spacing.
+            "io-message-header",
+            // Used by parent arbitrary selectors to tune IO preview body spacing and borders.
+            "io-message-content",
+            // Component-level selector hook for code block wrappers, not a Tailwind utility.
+            "codeblock",
+            // Sonner root hook used by group-[.toaster] descendant variants.
+            "toaster",
+            // Sonner toast hook used by group-[.toast] descendant variants.
+            "toast",
+            // Playground window selector hook used for page/window coordination.
+            "playground-window",
+            // react-grid-layout requires this wrapper class for grid layout behavior.
+            "layout",
+            // react-grid-layout draggableHandle points at this selector.
+            "drag-handle",
+            // Valid Tailwind peer marker; eslint-plugin-tailwindcss v4 misses it with Tailwind v4.
+            "peer",
+            // Valid named Tailwind peer marker; eslint-plugin-tailwindcss v4 misses it with Tailwind v4.
+            "peer/menu-button",
+          ],
+        },
+      ],
       // TODO: Enable these rule later
       // "tailwindcss/no-arbitrary-value": "warn",
       // "tailwindcss/no-contradicting-classname": "warn",
