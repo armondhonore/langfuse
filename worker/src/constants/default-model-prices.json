@@ -2842,9 +2842,9 @@
   {
     "id": "cmcnjkrfa000207l4fpnh5mnv",
     "modelName": "gemini-2.5-flash-lite",
-    "matchPattern": "(?i)^(google(ai)?\/)?(gemini-2.5-flash-lite)$",
+    "matchPattern": "(?i)^(google(ai)?\/)?(gemini-2.5-flash-lite(-preview-09-2025)?)$",
     "createdAt": "2025-07-03T13:44:06.964Z",
-    "updatedAt": "2026-06-19T00:00:00.000Z",
+    "updatedAt": "2026-06-22T00:00:00.000Z",
     "pricingTiers": [
       {
         "id": "cmcnjkrfa000207l4fpnh5mnv_tier_default",
