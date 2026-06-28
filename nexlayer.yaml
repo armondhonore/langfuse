@@ -2,12 +2,12 @@ application:
   name: langfuse
   pods:
   - name: app
-    image: langfuse/langfuse:latest
+    image: langfuse/langfuse:2.95.11
     path: /
     servicePorts:
     - 3000
     vars:
-      DATABASE_URL: "postgresql://langfuse:langfuse@postgres.pod:5432/langfuse"
+      DATABASE_URL: "postgresql://langfuse:langfuse@langfuse-postgres-service:5432/langfuse"
       NEXTAUTH_URL: "https://relaxed-weasel-langfuse.cloud.nexlayer.ai"
       NEXTAUTH_SECRET: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
       SALT: "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
