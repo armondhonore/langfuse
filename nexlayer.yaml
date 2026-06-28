@@ -2,7 +2,7 @@ application:
   name: langfuse
   pods:
   - name: app
-    image: langfuse/langfuse:2.95.11
+    image: mirror.gcr.io/langfuse/langfuse:2.95.11
     path: /
     servicePorts:
     - 3000
@@ -21,7 +21,7 @@ application:
       LANGFUSE_INIT_USER_NAME: "Armond"
       LANGFUSE_INIT_USER_PASSWORD: "nexlayer2024"
   - name: postgres
-    image: postgres:16-alpine
+    image: mirror.gcr.io/library/postgres:16-alpine
     servicePorts:
     - 5432
     vars:
